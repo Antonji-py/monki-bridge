@@ -1,113 +1,206 @@
-import Image from 'next/image'
+"use client";
 
-export default function Home() {
+import Image from "next/image";
+import { useState, useEffect } from "react";
+
+import { WalletButton } from "@/components/solana-provider";
+import { useAnchorWallet, useWallet } from "@solana/wallet-adapter-react";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createCloseAccountInstruction,
+  createTransferCheckedInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+  getOrCreateAssociatedTokenAccount,
+} from "@solana/spl-token";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+
+const VAULT_ADDRESS = new PublicKey(
+  "FysF4GbhYPRXHyFYTGxaqR8tFqUTFhLgwfG4msTqkm7M"
+);
+
+interface Nft {
+  mint: string;
+  name: string;
+  image: string;
+}
+
+const Home = () => {
+  const [nfts, setNfts] = useState<Nft[]>([]);
+  const [selectedNft, setSelectedNft] = useState<string>("");
+
+  const wallet = useWallet();
+
+  useEffect(() => {
+    if (wallet.publicKey) {
+      fetchCollectionNfts();
+    } else {
+      setNfts([]);
+    }
+  }, [wallet.publicKey]);
+
+  const fetchCollectionNfts = async () => {
+    const url =
+      "https://mainnet.helius-rpc.com/?api-key=d3c0176e-a4b9-4af6-a9de-7d15d757f31d";
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "0",
+        method: "getAssetsByOwner",
+        params: {
+          ownerAddress: wallet.publicKey!.toString(),
+          // ownerAddress: "9acPYYkQESAgpzbzjeNxNVWeMGDEof4H7qHcMzmHdhZf",
+          page: 1,
+          limit: 1000,
+        },
+      }),
+    });
+    const { result } = await response.json();
+
+    // const collectionAddress = "7FxzXETJZKtQxHSAjwU8dGEUdqxzzM4veGb2mWSGhifi"; // Monki
+    const collectionAddress = "WBixyhiaoiRBLAzuciMZND8GVTqhEskWf14enLcahja"; // platypus
+    const nftsFiltered: Nft[] = result.items
+      .map((item: any) => {
+        if (
+          item.grouping[0] &&
+          item.grouping[0].group_key == "collection" &&
+          item.grouping[0].group_value == collectionAddress
+        ) {
+          return {
+            mint: item.id,
+            name: item.content?.metadata?.name,
+            image: item.content?.links?.image,
+          };
+        }
+      })
+      .filter(Boolean);
+    setNfts(nftsFiltered);
+  };
+
+  const createSolanaTx = async () => {
+    // const connection = new Connection("https://api.mainnet-beta.solana.com");
+    const connection = new Connection(
+      "https://autumn-hardworking-thunder.solana-mainnet.quiknode.pro/c48f123b73c3e0784c1fd0247ccc712177df5c42/"
+    );
+    const tx = new Transaction();
+
+    const sourceATA = await getAssociatedTokenAddress(
+      new PublicKey(selectedNft),
+      wallet.publicKey!
+    );
+    const destinationATA = await getAssociatedTokenAddress(
+      new PublicKey(selectedNft),
+      VAULT_ADDRESS
+    );
+
+    const createDestinationATAIx = createAssociatedTokenAccountInstruction(
+      wallet.publicKey!,
+      destinationATA,
+      VAULT_ADDRESS,
+      new PublicKey(selectedNft)
+    );
+    tx.add(createDestinationATAIx);
+
+    const trasnferNftIx = createTransferCheckedInstruction(
+      sourceATA,
+      new PublicKey(selectedNft),
+      destinationATA,
+      wallet.publicKey!,
+      1,
+      0
+    );
+    tx.add(trasnferNftIx);
+
+    const closeSourceATAIx = createCloseAccountInstruction(
+      sourceATA,
+      VAULT_ADDRESS,
+      wallet.publicKey!
+    );
+    tx.add(closeSourceATAIx);
+
+    const signature = await wallet.sendTransaction(tx, connection);
+    console.log(signature);
+  };
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="flex min-h-screen flex-col items-center p-24 bg-slate-900 text-white text-lg">
+      <div className="px-12 py-6 space-y-4 bg-slate-700 rounded-lg">
+        <div className="flex justify-between space-x-8 items-center">
+          <p>1. Connect Solana Wallet</p>
+          <WalletButton />
+        </div>
+
+        <div className="items-center">
+          <p
+            onClick={() => {
+              console.log(nfts);
+            }}
           >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+            2. Select NFT you want to bridge
+          </p>
+          <div className="flex justify-center">
+            {nfts.length > 0 && (
+              <div className="w-fit grid grid-cols-4 place-items-center gap-3 mt-3">
+                {nfts.map((nft: Nft) => {
+                  return (
+                    <Image
+                      className="rounded-md hover:cursor-pointer ring-orange-600 hover:ring-4"
+                      onClick={(e) => {
+                        setSelectedNft(nft.mint);
+
+                        const img = e.currentTarget;
+                        if (img.dataset.clicked === "true") {
+                          img.dataset.clicked = "false";
+                          img.className =
+                            "rounded-md hover:cursor-pointer ring-orange-600 hover:ring-4";
+                        } else {
+                          img.dataset.clicked = "true";
+                          img.className =
+                            "rounded-md hover:cursor-pointer ring-orange-600 ring-4";
+                        }
+                      }}
+                      src={nft.image}
+                      width={96}
+                      height={96}
+                      alt={nft.name}
+                      key={nft.mint}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center space-x-4">
+          <p className="whitespace-nowrap inline-block">
+            3. Enter your Injective address
+          </p>
+          <input
+            type="text"
+            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+            placeholder="inj..."
+            required
+          />
+        </div>
+
+        <div className="flex justify-center mt-6">
+          <button
+            className="bg-orange-600 px-2 py-1 rounded-md text-xl"
+            onClick={createSolanaTx}
+          >
+            Bridge
+          </button>
         </div>
       </div>
-
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
     </main>
-  )
-}
+  );
+};
+
+export default Home;
